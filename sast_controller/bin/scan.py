@@ -22,7 +22,9 @@ from time import time
 import logging
 
 from requests.exceptions import ConnectionError
+from slackclient import SlackClient
 
+from sast_controller.bin.notifications import send_slack_message
 from sast_controller.drivers.cx.utils import zip_prj, write_file, zip_latest_files
 
 from sast_controller.drivers.cx import CxManager
@@ -37,6 +39,7 @@ def cx_scan(local_, prj_, inc_, f_path):
     except CxIncrementalScanException:
         report = CxManager.scan_project(local_path=local_, project=prj_, incremental_scan=False)
     except Exception as e:
+        _send_slack_message(str(e))
         logging.error(str(e))
         return
     if report and report.ScanResults:
@@ -69,9 +72,11 @@ def run_checkmarx_test(project, path_, excluded_paths, excluded_types, increment
     try:
         zip_prj(path_, local_path, excluded_paths, excluded_types)
     except FileNotFoundError:
+        _send_slack_message(f'No such directory: {path_}')
         logging.error('No such directory:', path_)
         return
     except Exception as e:
+        _send_slack_message(str(e))
         logging.error(str(e))
         return
     cx_scan(local_path, project, incremental_scan, xml_path)
@@ -206,9 +211,23 @@ def f(cmd):
         try:
             snyk_scan()
         except Exception:
+            _send_slack_message(traceback.extract_tb(1000))
             traceback.print_exc()
     print(cmd, ' fin ', time() - ts_)
     return output
+
+
+def _send_slack_message(message: str):
+    """
+    Environment variables SLACK_TOKEN and SLACK_CHANNEL must be set
+    :param message: command to execute
+    """
+    try:
+        slack_token = environ.get("SLACK_TOKEN")
+        slack_channel = environ.get("SLACK_CHANNEL")
+        send_slack_message(SlackClient(slack_token), channel=slack_channel, message=message)
+    except Exception as e:
+        logging.warning(f"Slack message isn't sent:\n{e}")
 
 
 def main():
